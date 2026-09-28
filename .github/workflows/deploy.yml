@@ -1,0 +1,108 @@
+name: Deploy NodeJS Application to Hosting
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    environment: CLERK_PUBLISHABLE_KEY
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy Via SSH
+        uses: appleboy/ssh-action@master
+        with:
+          command_timeout: 30m
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || '22' }}
+          script: |
+            # NVM setup
+            export NVM_DIR="$HOME/.nvm"
+            source "$NVM_DIR/nvm.sh"
+
+            node -v
+            npm -v
+
+            # Navigate to application directory
+            cd ${{ secrets.DEPLOY_PATH || '/var/www/mediacodex' }}
+            
+            # Pull latest changes
+            git pull origin main
+            
+            # Install backend dependencies with increased memory limit
+            cd backend
+            
+            npm install 
+            # npm -g install typescript dbmate pm2
+            
+            cat <<EOF > .env
+            ## clerk auth keys
+            CLERK_PUBLISHABLE_KEY=${{ secrets.CLERK_PUBLISHABLE_KEY }}
+            CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
+
+
+            ## AWS Configuration
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            AWS_SQS_URL=${{ secrets.AWS_SQS_URL }}
+            AWS_SQS_QUEUE_NAME=${{ secrets.AWS_SQS_QUEUE_NAME }}
+            AWS_REGION=${{ secrets.AWS_REGION }}
+            AWS_RAW_BUCKET=${{ secrets.AWS_RAW_BUCKET }}
+            AWS_PROCESSED_BUCKET=${{ secrets.AWS_PROCESSED_BUCKET }}
+            AWS_ENDPOINT_MODE=aws
+
+            ## AWS ECS config
+            ECS_CLUSTER_ARN=${{ secrets.ECS_CLUSTER_ARN }}
+            ECS_SECURITY_GROUP=${{ secrets.ECS_SECURITY_GROUP }}
+            ECR_CONTAINER_NAME=${{ secrets.ECR_CONTAINER_NAME }}
+            ## comma separated subnet ids
+            ECS_TASK_SUBNETS=${{ secrets.ECS_TASK_SUBNETS }}
+
+            ## AWS ECS Task config
+            ECS_TASK_ARN=${{ secrets.ECS_TASK_ARN }}
+
+
+            ## JWT Configuration
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            JWT_EXPIRES_IN=5m
+
+            ## Database
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+
+            ## Player Host
+            VIDEO_PLAYER_HOST=${{ secrets.VIDEO_PLAYER_HOST }}
+
+            CLOUDFRONT_DOMAIN_NAME=${{ secrets.CLOUDFRONT_DOMAIN_NAME }}
+            CLOUDFRONT_PRIVATE_KEY_PATH=${{ secrets.CLOUDFRONT_PRIVATE_KEY_PATH || './certs/cloudfront_private_key.pem' }}
+            
+            CLOUDFRONT_KEY_PAIR_ID=${{ secrets.CLOUDFRONT_KEY_PAIR_ID }}
+
+            VIDEO_STATUS_CRON_INTERVAL_MINUTES=${{ secrets.VIDEO_STATUS_CRON_INTERVAL_MINUTES }}
+
+            ## Cors Origins (comma separated)
+            CORS_ORIGINS=${{ secrets.CORS_ORIGINS }}
+            
+            # Domain name of application, used for generating signed URLs 
+            DOMAIN_NAME=${{ secrets.DOMAIN_NAME }}
+            
+            EOF
+            
+            ## Database Migration
+            npm run migrate:up
+            
+            # Build TypeScript application with memory limit
+            export NODE_OPTIONS="--max-old-space-size=4096"
+            npm run build
+
+            
+            # # Start the application directly
+            pm2 restart mediacodex-app
+
+            
